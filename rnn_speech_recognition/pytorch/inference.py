@@ -31,8 +31,7 @@ import pickle
 import time
 
 import torchvision
-
-
+import intel_pytorch_extension as ipex
 def parse_args():
     parser = argparse.ArgumentParser(description='Jasper')
     parser.add_argument("--local_rank", default=None, type=int)
@@ -125,25 +124,30 @@ def eval(
         else:
             # warm up
             if args.warm_up > 0:
-                print("\nstart warm up, warmp_up steps = ", args.warm_up)            
-                for it, data in enumerate(tqdm(data_layer.data_iterator)):
-                    t_audio_signal_e, t_a_sig_length_e, t_transcript_e, t_transcript_len_e = audio_processor(data)
-                    if args.ipex and args.int8:
-                        conf = ipex.AmpConf(torch.int8, args.configure_dir)
-                        t_predictions_e = greedy_decoder.decode(t_audio_signal_e, t_a_sig_length_e, args, conf)
+                print("\nstart warm up, warmp_up steps = ", args.warm_up)     
+                with ipex.amp.autocast(enabled=True, configure=ipex.conf.AmpConf(torch.bfloat16)):  
+                    print("run bf16 path")     
+                    for it, data in enumerate(tqdm(data_layer.data_iterator)):
+                        t_audio_signal_e, t_a_sig_length_e, t_transcript_e, t_transcript_len_e = audio_processor(data)
+                        if args.ipex and args.int8:
+                            conf = ipex.AmpConf(torch.int8, args.configure_dir)
+                            t_predictions_e = greedy_decoder.decode(t_audio_signal_e, t_a_sig_length_e, args, conf)
 
-                    else:
-                        conf = None
-                        t_predictions_e = greedy_decoder.decode(t_audio_signal_e, t_a_sig_length_e, args, conf)
-                    
-                    if it + 1 >= args.warm_up:
-                        break
+                        else:
+                            conf = None
+                            t_predictions_e = greedy_decoder.decode(t_audio_signal_e, t_a_sig_length_e, args, conf)
+                        
+                        if it + 1 >= args.warm_up:
+                            break
 
             # measure performance
             print("\nstart measure performance, measure steps = ", args.steps)
             total_time = 0
             with torch.autograd.profiler.profile(args.profiling) as prof:
             # with torch.autograd.profiler.profile(args.profiling, record_shapes=True) as prof:
+              import intel_pytorch_extension as ipex
+              with ipex.amp.autocast(enabled=True, configure=ipex.conf.AmpConf(torch.bfloat16)):  
+                print("run bf16 path")   
                 for it, data in enumerate(tqdm(data_layer.data_iterator)):
                     t_audio_signal_e, t_a_sig_length_e, t_transcript_e, t_transcript_len_e = audio_processor(data)
                     if args.ipex and args.int8:
@@ -269,14 +273,14 @@ def main(args):
 
     if args.ipex:
         import intel_pytorch_extension as ipex
-        model = model.to(ipex.DEVICE)
-        ipex.core.enable_auto_dnnl()
-        if args.mix_precision:
-            ipex.enable_auto_mixed_precision(mixed_dtype=torch.bfloat16)
-        if args.jit:
-            print("running jit path")
-            model.joint_net = torch.jit.script(model.joint_net)
-    else:
+        # model = model.to(ipex.DEVICE)
+        # ipex.core.enable_auto_dnnl()
+        # if args.mix_precision:
+        #     ipex.enable_auto_mixed_precision(mixed_dtype=torch.bfloat16)
+        # if args.jit:
+        #     print("running jit path")
+        #     model.joint_net = torch.jit.script(model.joint_net)
+    # else:
         model = model.to("cpu")
 
     #greedy_decoder = GreedyCTCDecoder()
